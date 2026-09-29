@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Meeting Scheduler</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen text-gray-800">
+
+    <div class="max-w-4xl mx-auto py-10 px-4">
+        <!-- Header -->
+        <header class="text-center mb-10">
+            <h1 class="text-4xl font-extrabold text-blue-600 tracking-tight">Smart Meeting Scheduler</h1>
+            <p class="text-gray-500 mt-2">Instantly calculate overlapping free times without manual coordination.</p>
+        </header>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Left Panel: Input Form -->
+            <div class="bg-white p-6 rounded-xl shadow-md border border-gray-100">
+                <h2 class="text-xl font-bold mb-4 text-gray-700">1. Setup Meeting Details</h2>
+                
+                <div class="mb-4">
+                    <label class="block text-sm font-semibold text-gray-600 mb-1">Target Date</label>
+                    <input type="date" id="meetingDate" value="2026-08-10" class="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-400 outline-none">
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-semibold text-gray-600 mb-1">Duration (Minutes)</label>
+                    <input type="number" id="meetingDuration" value="45" min="15" step="15" class="w-full border border-gray-300 rounded-lg p-2 focus:ring-2 focus:ring-blue-400 outline-none">
+                </div>
+
+                <hr class="mb-6">
+
+                <h2 class="text-xl font-bold mb-3 text-gray-700">2. Add Participants</h2>
+                <div class="space-y-4" id="participantsContainer">
+                    <!-- Participant templates will be injected here -->
+                </div>
+
+                <button onclick="addParticipant()" class="mt-4 w-full bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold py-2 px-4 rounded-lg transition-all">
+                    + Add Participant
+                </button>
+            </div>
+
+            <!-- Right Panel: Results -->
+            <div class="flex flex-col justify-between">
+                <div class="bg-white p-6 rounded-xl shadow-md border border-gray-100 min-h-[300px]">
+                    <h2 class="text-xl font-bold mb-4 text-gray-700">3. Available Slots</h2>
+                    <div id="resultsContainer" class="space-y-3">
+                        <p class="text-gray-400 text-center py-10">Set up your participants and click "Find Free Slots" to see matching times.</p>
+                    </div>
+                </div>
+
+                <button onclick="calculateSchedule()" class="mt-6 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all text-lg">
+                    Find Free Slots ⚡
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Frontend logic to talk to FastAPI -->
+    <script>
+        let participantCount = 0;
+
+        // Default layout generator for a single participant card
+        function addParticipant(name = "", busyStart = "", busyEnd = "") {
+            participantCount++;
+            const container = document.getElementById('participantsContainer');
+            
+            const card = document.createElement('div');
+            card.className = "p-4 bg-gray-50 rounded-lg border border-gray-200 relative";
+            card.id = `participant-${participantCount}`;
+            card.innerHTML = `
+                <div class="flex justify-between items-center mb-2">
+                    <input type="text" placeholder="Name" value="${name}" class="pName font-semibold bg-transparent border-b border-gray-300 focus:border-blue-500 outline-none text-sm" required>
+                    <button onclick="this.parentElement.parentElement.remove()" class="text-red-500 hover:text-red-700 text-sm">Remove</button>
+                </div>
+                <div class="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                        <label class="text-gray-500">Busy Start</label>
+                        <input type="time" value="${busyStart}" class="pBusyStart w-full p-1 border rounded mt-1">
+                    </div>
+                    <div>
+                        <label class="text-gray-500">Busy End</label>
+                        <input type="time" value="${busyEnd}" class="pBusyEnd w-full p-1 border rounded mt-1">
+                    </div>
+                </div>
+            `;
+            container.appendChild(card);
+        }
+
+        // Send data to backend and render responses
+        async function calculateSchedule() {
+            const date = document.getElementById('meetingDate').value;
+            const duration = parseInt(document.getElementById('meetingDuration').value);
+            const cards = document.querySelectorAll('#participantsContainer > div');
+            
+            if (cards.length === 0) {
+                alert("Please add at least one participant!");
+                return;
+            }
+
+            const users = Array.from(cards).map(card => {
+                const name = card.querySelector('.pName').value || "Guest";
+                const bStart = card.querySelector('.pBusyStart').value;
+                const bEnd = card.querySelector('.pBusyEnd').value;
+                
+                const busy_slots = [];
+                if (bStart && bEnd) {
+                    busy_slots.push({
+                        start: `${date} ${bStart}`,
+                        end: `${date} ${bEnd}`
+                    });
+                }
+                return { name, busy_slots };
+            });
+
+            const resultsContainer = document.getElementById('resultsContainer');
+            resultsContainer.innerHTML = `<p class="text-gray-500 text-center py-10">Calculating schedule...</p>`;
+
+            try {
+                const response = await fetch('http://127.0.0.1:8000/api/schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ users, date, duration_minutes: duration })
+                });
+                
+                const data = await response.json();
+                resultsContainer.innerHTML = '';
+
+                if (!data.options || data.options.length === 0) {
+                    resultsContainer.innerHTML = `
+                        <div class="text-center py-10">
+                            <span class="text-3xl">😞</span>
+                            <p class="text-gray-500 mt-2">No overlapping slots found. Try adjusting meeting hours or participant busy times.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                data.options.forEach(slot => {
+                    const slotDiv = document.createElement('div');
+                    slotDiv.className = "flex justify-between items-center bg-blue-50 border border-blue-200 text-blue-800 p-4 rounded-lg shadow-sm";
+                    slotDiv.innerHTML = `
+                        <div>
+                            <p class="font-bold text-sm">Available Window</p>
+                            <p class="text-lg font-mono font-semibold">${slot.start} - ${slot.end}</p>
+                        </div>
+                        <button onclick="alert('Meeting Booked!')" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs px-3 py-2 rounded-md shadow-sm transition-all">Book This</button>
+                    `;
+                    resultsContainer.appendChild(slotDiv);
+                });
+
+            } catch (error) {
+                resultsContainer.innerHTML = `
+                    <div class="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg text-sm">
+                        Failed to connect to the backend server. Make sure you started your FastAPI server!
+                    </div>
+                `;
+            }
+        }
+
+        // Add some default participants on load for demonstration
+        window.onload = () => {
+            addParticipant("Alice", "10:00", "11:30");
+            addParticipant("Bob", "11:00", "12:30");
+        };
+    </script>
+</body>
+</html>
